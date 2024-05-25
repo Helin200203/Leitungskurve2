@@ -4,28 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import read_data  # Ihr eigenes Modul
-
-# Funktion zur Berechnung der Zonen basierend auf der Herzfrequenz
-def calculate_zones(max_heart_rate, heart_rate_data, power_data):
-    zones = {
-        'Zone 1': (0, 0.5 * max_heart_rate),
-        'Zone 2': (0.5 * max_heart_rate, 0.6 * max_heart_rate),
-        'Zone 3': (0.6 * max_heart_rate, 0.7 * max_heart_rate),
-        'Zone 4': (0.7 * max_heart_rate, 0.8 * max_heart_rate),
-        'Zone 5': (0.8 * max_heart_rate, max_heart_rate)
-    }
-    zone_times = {zone: 0 for zone in zones}
-    zone_power = {zone: [] for zone in zones}
-
-    for hr, power in zip(heart_rate_data, power_data):
-        for zone, (lower, upper) in zones.items():
-            if lower <= hr < upper:
-                zone_times[zone] += 1
-                zone_power[zone].append(power)
-
-    avg_power = {zone: (sum(powers)/len(powers)) if powers else 0 for zone, powers in zone_power.items()}
-    
-    return zone_times, avg_power
+import leistungskurve_2 as ls2d
 
 # Laden der Aktivitätsdaten
 activity_data = pd.read_csv('activity.csv')
@@ -42,6 +21,55 @@ if 'picture_path' not in st.session_state:
     st.session_state.picture_path = 'data/pictures/none.jpg'
 
 person_names = read_data.get_person_list()
+
+
+
+
+# Anzeige der Leistungsdaten
+st.title('Aktivitätsanalyse')
+st.write(f"Durchschnittliche Leistung: {mean_power:.2f} W")
+st.write(f"Maximale Leistung: {max_power:.2f} W")
+
+# Interaktiver Plot
+st.subheader('Leistung und Herzfrequenz über die Zeit')
+
+fig = go.Figure()
+
+fig.add_trace(go.Scatter(x=activity_data.index, y=activity_data['PowerOriginal'],
+                         mode='lines', name='Leistung', line=dict(color='blue')))
+fig.add_trace(go.Scatter(x=activity_data.index, y=activity_data['HeartRate'],
+                         mode='lines', name='Herzfrequenz', line=dict(color='red')))
+
+fig.update_layout(title='Leistung und Herzfrequenz über die Zeit',
+                  xaxis_title='Zeit (s)',
+                  yaxis_title='Wert',
+                  legend=dict(x=0, y=1),
+                  template='plotly_white')
+
+st.plotly_chart(fig, use_container_width=True)
+
+# Herzfrequenz-Zonen
+max_heart_rate = st.number_input('Maximale Herzfrequenz', min_value=100, max_value=220, value=190, step=1)
+zone_times, avg_power = read_data.calculate_zones(max_heart_rate, activity_data['HeartRate'], activity_data['PowerOriginal'])
+
+# Zeit in Herzfrequenz-Zonen als Tabelle darstellen
+st.subheader('Zeit in Herzfrequenz-Zonen')
+zone_times_df = pd.DataFrame(list(zone_times.items()), columns=['Zone', 'Zeit (s)'])
+st.table(zone_times_df)
+
+# Durchschnittliche Leistung in den Zonen als Tabelle darstellen
+st.subheader('Durchschnittliche Leistung in den Zonen')
+avg_power_df = pd.DataFrame(list(avg_power.items()), columns=['Zone', 'Durchschnittliche Leistung (W)'])
+st.table(avg_power_df)
+
+#Leistungskurve 2 Aufgaben:
+st.subheader("Daten in Tabellendarstellung")
+result_df = ls2d.calculate_duration_above_threshold(activity_data)
+st.dataframe(result_df)
+
+st.subheader("Daten in Diagrammdarstellung")
+fig = px.line(result_df, y='Threshold', x='Max Duration', title='Dauer pro Threshold', labels={'Threshold': 'Threshold in Watt', 'Max Duration': 'Durations in Seconds'})
+st.plotly_chart(fig)
 
 
 st.markdown(
@@ -97,58 +125,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-
-st.write("# EKG APP")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.write("## Versuchsperson auswählen")
-    st.session_state.current_user = st.selectbox(
-        'Versuchsperson',
-        options=person_names, key="sbVersuchsperson")
-
-with col2:
-    st.write("## Bild der Versuchsperson")
-    if st.session_state.current_user in person_names:
-        st.session_state.picture_path = read_data.find_person_data_by_name(st.session_state.current_user)["picture_path"]
-    image = Image.open("./" + st.session_state.picture_path)
-    st.image(image, caption=st.session_state.current_user)
-
-# Anzeige der Leistungsdaten
-st.title('Aktivitätsanalyse')
-st.write(f"Durchschnittliche Leistung: {mean_power:.2f} W")
-st.write(f"Maximale Leistung: {max_power:.2f} W")
-
-# Interaktiver Plot
-st.subheader('Leistung und Herzfrequenz über die Zeit')
-
-fig = go.Figure()
-
-fig.add_trace(go.Scatter(x=activity_data.index, y=activity_data['PowerOriginal'],
-                         mode='lines', name='Leistung', line=dict(color='blue')))
-fig.add_trace(go.Scatter(x=activity_data.index, y=activity_data['HeartRate'],
-                         mode='lines', name='Herzfrequenz', line=dict(color='red')))
-
-fig.update_layout(title='Leistung und Herzfrequenz über die Zeit',
-                  xaxis_title='Zeit (s)',
-                  yaxis_title='Wert',
-                  legend=dict(x=0, y=1),
-                  template='plotly_white')
-
-st.plotly_chart(fig, use_container_width=True)
-
-# Herzfrequenz-Zonen
-max_heart_rate = st.number_input('Maximale Herzfrequenz', min_value=100, max_value=220, value=190, step=1)
-zone_times, avg_power = calculate_zones(max_heart_rate, activity_data['HeartRate'], activity_data['PowerOriginal'])
-
-# Zeit in Herzfrequenz-Zonen als Tabelle darstellen
-st.subheader('Zeit in Herzfrequenz-Zonen')
-zone_times_df = pd.DataFrame(list(zone_times.items()), columns=['Zone', 'Zeit (s)'])
-st.table(zone_times_df)
-
-# Durchschnittliche Leistung in den Zonen als Tabelle darstellen
-st.subheader('Durchschnittliche Leistung in den Zonen')
-avg_power_df = pd.DataFrame(list(avg_power.items()), columns=['Zone', 'Durchschnittliche Leistung (W)'])
-st.table(avg_power_df)
