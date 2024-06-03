@@ -1,53 +1,46 @@
-import streamlit as st
-from PIL import Image
+import json
+import numpy as np
 import pandas as pd
-import plotly.express as px
+import streamlit as st
 import plotly.graph_objects as go
-import read_data  # Ihr eigenes Modul
-import leistungskurve_2 as ls2d
-from person import Person
 from ekgdata import EKGTest
+from person import Person
+from PIL import Image
 
-# Laden der Aktivitätsdaten
-activity_data = pd.read_csv('activity.csv')
 
-# Berechnungen
-mean_power = activity_data['PowerOriginal'].mean()
-max_power = activity_data['PowerOriginal'].max()
+def callback_function():
+    print(f"The user has changed to {st.session_state.current_user}")
+    print(f"The EKG date has changed to {st.session_state.ekg_date}")
 
-# Initialisierung von Session State Variablen
+@st.cache
+def load_person_data():
+    return Person.load_person_data()
+
+@st.cache
+def get_person_list(person_dict):
+    return Person.get_person_list(person_dict)
+
+@st.cache
+def load_ekg_data(ekg_id, person_data):
+    return EKGTest.lade_nach_id(ekg_id, person_data)
+
+@st.cache
+def estimate_heart_rate(ekg, threshold=350):
+    return ekg.schaetze_hr(ekg.ergebnis['Amplitude'])
+
+# Initialize session states if not already set
 if 'current_user' not in st.session_state:
     st.session_state.current_user = 'None'
-
 if 'picture_path' not in st.session_state:
     st.session_state.picture_path = 'data/pictures/none.jpg'
+if 'current_date' not in st.session_state:
+    st.session_state.current_date = None
+if 'result' not in st.session_state:
+    st.session_state.result = None
 
-person_names = read_data.get_person_list()
+person_dict = load_person_data()
+person_names = get_person_list(person_dict)
 
-# Anzeige der Leistungsdaten
-st.title('Aktivitätsanalyse')
-st.write(f"Durchschnittliche Leistung: {mean_power:.2f} W")
-st.write(f"Maximale Leistung: {max_power:.2f} W")
-
-# Interaktiver Plot
-st.subheader('Leistung und Herzfrequenz über die Zeit')
-
-fig = go.Figure()
-
-fig.add_trace(go.Scatter(x=activity_data.index, y=activity_data['PowerOriginal'],
-                         mode='lines', name='Leistung', line=dict(color='blue')))
-fig.add_trace(go.Scatter(x=activity_data.index, y=activity_data['HeartRate'],
-                         mode='lines', name='Herzfrequenz', line=dict(color='red')))
-
-fig.update_layout(title='Leistung und Herzfrequenz über die Zeit',
-                  xaxis_title='Zeit (s)',
-                  yaxis_title='Wert',
-                  legend=dict(x=0, y=1),
-                  template='plotly_white')
-
-st.plotly_chart(fig, use_container_width=True)
-
-# EKG App
 st.write("# EKG APP")
 
 col1, col2 = st.columns(2)
@@ -55,94 +48,70 @@ col1, col2 = st.columns(2)
 with col1:
     st.write("## Versuchsperson auswählen")
     st.session_state.current_user = st.selectbox(
-        'Versuchsperson',
-        options=person_names, key="sbVersuchsperson")
+        'Versuchsperson', options=person_names, key="sbVersuchsperson", on_change=callback_function
+    )
+    current_person_dict = Person.find_person_data_by_name(st.session_state.current_user)
 
 with col2:
     st.write("## Bild der Versuchsperson")
     if st.session_state.current_user in person_names:
-        person_data = read_data.find_person_data_by_name(st.session_state.current_user)
-        st.session_state.picture_path = person_data["picture_path"]
-        person_id = person_data["id"]
-    else:
-        person_data = None
-        person_id = None
-
+        st.session_state.picture_path = current_person_dict["picture_path"]
     image = Image.open("./" + st.session_state.picture_path)
     st.image(image, caption=st.session_state.current_user)
 
-if person_id:
-    person = Person.lade_nach_id(person_id)
-    if person:
-        st.write(f"Name: {person.firstname} {person.lastname}")
-        st.write(f"Alter: {person.berechne_alter()}")
-        st.write(f"Maximale Herzfrequenz: {person.berechne_max_herzfrequenz()}")
+st.write("## EKG Daten")
+ekg_data = current_person_dict["ekg_tests"]
+ekg_dates = [ekg["datum"] for ekg in ekg_data]
+st.session_state.current_date = st.selectbox(
+    'Experimentauswahl', options=ekg_dates, key="sbExperimentauswahl", on_change=callback_function
+)
 
-        test_dates = [test['date'] for test in person.ekg_tests]
-        if test_dates:
-            selected_date = st.selectbox("EKG-Test Datum auswählen", test_dates)
-            selected_test = next(test for test in person.ekg_tests if test['date'] == selected_date)
-            test_id = selected_test['id']
-            ekg_test = EKGTest.lade_nach_id(test_id)
-            if ekg_test:
-                st.write(f"Datum des Tests: {ekg_test.datum}")
-                ekg_test.finde_peaks()
+selected_ekg_data = next(ekg for ekg in ekg_data if ekg["datum"] == st.session_state.current_date)
+ekg = EKGTest(selected_ekg_data["id"], selected_ekg_data["datum"], selected_ekg_data["ergebnis_pfad"])
 
-                # EKG-Daten anzeigen
-                st.write("EKG-Daten erfolgreich geladen:")
-                ekg_data = pd.read_csv(ekg_test.ergebnis_pfad, delim_whitespace=True, names=['Time', 'Amplitude'])
-                st.table(ekg_data.head())
+if st.session_state.result is None:
+    st.session_state.result = estimate_heart_rate(ekg)
 
-                # Peaks in einer Tabelle anzeigen
-                st.write("Gefundene Peaks:")
-                if ekg_test.peaks:
-                    peaks_df = pd.DataFrame(ekg_test.peaks, columns=['Peak Position'])
-                    st.table(peaks_df)
-                else:
-                    st.write("Keine Peaks gefunden.")
-                
-                # Durchschnittspuls berechnen und anzeigen
-                try:
-                    avg_hr = ekg_test.schaetze_hr()
-                    st.write(f"Geschätzte Herzfrequenz: {avg_hr}")
-                except Exception as e:
-                    st.error(f"Fehler bei der Schätzung der Herzfrequenz. Überprüfen Sie die Peaks. {e}")
-                
-                # EKG-Daten plotten
-                st.write("EKG-Daten Plot:")
-                ekg_test.plot_zeitreihe()
-            else:
-                st.error("Fehler beim Laden des EKG-Tests.")
-        else:
-            st.warning("Keine EKG-Tests für diese Person gefunden.")
-    else:
-        st.error("Person nicht gefunden. Bitte geben Sie eine gültige ID ein.")
+result = st.session_state.result
 
-# Herzfrequenz-Zonen
-st.title('Herzfrequenz-Zonen Analyse')
-max_heart_rate = st.number_input('Maximale Herzfrequenz', min_value=100, max_value=220, value=190, step=1)
-zone_times, avg_power = read_data.calculate_zones(max_heart_rate, activity_data['HeartRate'], activity_data['PowerOriginal'])
+# Plotting
+fig = go.Figure()
 
-# Zeit in Herzfrequenz-Zonen als Tabelle darstellen
-st.subheader('Zeit in Herzfrequenz-Zonen')
-zone_times_df = pd.DataFrame(list(zone_times.items()), columns=['Zone', 'Zeit (s)'])
-st.table(zone_times_df)
+# Plot EKG Signal
+fig.add_trace(go.Scatter(x=ekg.ergebnis['Time'], y=ekg.ergebnis['Amplitude'], mode='lines', name='EKG in mV'))
 
-# Durchschnittliche Leistung in den Zonen als Tabelle darstellen
-st.subheader('Durchschnittliche Leistung in den Zonen')
-avg_power_df = pd.DataFrame(list(avg_power.items()), columns=['Zone', 'Durchschnittliche Leistung (W)'])
-st.table(avg_power_df)
+# Plot Peaks
+peaks = EKGTest.finde_peaks(ekg.ergebnis['Amplitude'])
+fig.add_trace(go.Scatter(x=ekg.ergebnis['Time'].iloc[peaks], y=ekg.ergebnis['Amplitude'].iloc[peaks], mode='markers', name='Peaks', marker=dict(color='red')))
 
-# Leistungskurve 2 Aufgaben:
-st.subheader("Daten in Tabellendarstellung")
-result_df = ls2d.calculate_duration_above_threshold(activity_data)
-st.dataframe(result_df)
+# Update Layout
+fig.update_layout(height=600, width=800, title_text="EKG Signal and Heart Rate")
+fig.update_xaxes(title_text="Time")
+fig.update_yaxes(title_text="EKG in mV")
+st.plotly_chart(fig, use_container_width=True)
 
-st.subheader("Daten in Diagrammdarstellung")
-fig = px.line(result_df, y='Threshold', x='Max Duration', title='Dauer pro Threshold', labels={'Threshold': 'Threshold in Watt', 'Max Duration': 'Durations in Seconds'})
-st.plotly_chart(fig)
+st.write("## Parameter")
+st.write("Max Heartrate", ekg.max_heart_rate(Person.calc_age(current_person_dict["date_of_birth"]), "male"))
+st.write("Durchschnittswert in mV", ekg.ergebnis["Amplitude"].mean())
 
-# Style-Anpassungen
+# Main execution
+if __name__ == "__main__":
+    print("EKG Analyse")
+    
+    # Load the person data from JSON file
+    with open("data/person_db.json", "r") as file:
+        person_data = json.load(file)
+    
+    # Access the first EKG test data for the first person in the JSON
+    ekg_dict = person_data[0]["ekg_tests"][0]
+    print(ekg_dict)
+    
+    # Create an instance of EKGTest
+    ekg = EKGTest(ekg_dict["id"], ekg_dict["datum"], ekg_dict["ergebnis_pfad"])
+    
+    # Print the first few rows of the EKG data
+    print(ekg.ergebnis.head())
+    
 st.markdown(
     """
     <style>
