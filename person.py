@@ -26,6 +26,7 @@ class Person:
         for eintrag in person_data:
             list_of_names.append(eintrag["lastname"] + ", " +  eintrag["firstname"])
         return list_of_names
+    
     @staticmethod
     def find_person_data_by_name(suchstring):
         """Eine Funktion, der Nachname, Vorname als ein String übergeben wird und die die Person als Dictionary zurückgibt."""
@@ -49,9 +50,6 @@ class Person:
     def berechne_alter(self):
         heute = datetime.today()
         return heute.year - self.date_of_birth
-
-    def berechne_max_herzfrequenz(self):
-        return 220 - self.berechne_alter()
 
     @staticmethod
     def lade_nach_id(id):

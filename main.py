@@ -6,7 +6,8 @@ import plotly.graph_objects as go
 from ekgdata import EKGTest
 from person import Person
 from PIL import Image
-
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 def callback_function():
     print(f"The user has changed to {st.session_state.current_user}")
@@ -61,56 +62,56 @@ with col2:
 
 st.write("## EKG Daten")
 ekg_data = current_person_dict["ekg_tests"]
-ekg_dates = [ekg["datum"] for ekg in ekg_data]
+ekg_dates = [ekg["date"] for ekg in ekg_data]
 st.session_state.current_date = st.selectbox(
     'Experimentauswahl', options=ekg_dates, key="sbExperimentauswahl", on_change=callback_function
 )
 
-selected_ekg_data = next(ekg for ekg in ekg_data if ekg["datum"] == st.session_state.current_date)
-ekg = EKGTest(selected_ekg_data["id"], selected_ekg_data["datum"], selected_ekg_data["ergebnis_pfad"])
+selected_ekg_data = next(ekg for ekg in ekg_data if ekg["date"] == st.session_state.current_date)
+ekg = EKGTest(selected_ekg_data["id"], selected_ekg_data["date"], selected_ekg_data["result_link"])
 
-if st.session_state.result is None:
-    st.session_state.result = estimate_heart_rate(ekg)
+ekg.ergebnis = EKGTest.estimate_hr_dataset(ekg.ergebnis)
+# Erstellen eines DataFrames
 
-result = st.session_state.result
+# Dateiname
+datei_name = 'ekg_ergebnis.txt'
 
-# Plotting
-fig = go.Figure()
+# Speichern des DataFrames in eine Textdateie
+ekg.ergebnis.to_csv(datei_name, index=False, sep='\t')
+
+print(f"Das Array wurde erfolgreich in {datei_name} gespeichert.")
+
+# Create subplots
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                    subplot_titles=("EKG Signal", "Heart Rate"))
 
 # Plot EKG Signal
-fig.add_trace(go.Scatter(x=ekg.ergebnis['Time'], y=ekg.ergebnis['Amplitude'], mode='lines', name='EKG in mV'))
+fig.add_trace(go.Scatter(x=ekg.ergebnis['Time'], y=ekg.ergebnis['Amplitude'], mode='lines', name='EKG in mV'), row=1, col=1)
 
 # Plot Peaks
-peaks = EKGTest.finde_peaks(ekg.ergebnis['Amplitude'])
-fig.add_trace(go.Scatter(x=ekg.ergebnis['Time'].iloc[peaks], y=ekg.ergebnis['Amplitude'].iloc[peaks], mode='markers', name='Peaks', marker=dict(color='red')))
+fig.add_trace(go.Scatter(x=ekg.ergebnis['Time'], y=ekg.ergebnis['Peaks'], mode='markers', name='Peaks', marker=dict(color='red')), row=1, col=1)
+
+#Komischerweise funktioniert es leider nicht, sodass die x-Achse bei dm oberen Graph, der länge des unteren Graphes entspricht.
+# Ich habe hierfür mit Matthias zusammengearbeitet, aber wir sind nicht auf das richtige Ergebnis gekommen
+# bei ihm funktioniert es aber bei mir nicht, was die Sache noch komischer macht.
+fig.add_trace(go.Scatter(x=ekg.ergebnis.index, y=ekg.ergebnis["HeartRate"], mode='markers', name='Heart Rate', marker=dict(color='blue')),
+              row=2, col=1)
+
+peak_indices = ekg.ergebnis.dropna(subset=["HeartRate"]).index 
+# Plot Heart Rate (interpolated over entire series)
+fig.add_trace(go.Scatter(x=peak_indices, y=ekg.ergebnis.loc[peak_indices, "HeartRate"], mode='lines', name='Heart Rate', marker=dict(color='blue'), line=dict(color='green')), row=2, col=1)
 
 # Update Layout
 fig.update_layout(height=600, width=800, title_text="EKG Signal and Heart Rate")
-fig.update_xaxes(title_text="Time")
-fig.update_yaxes(title_text="EKG in mV")
+fig.update_xaxes(title_text="Time", row=2, col=1)
+fig.update_yaxes(title_text="EKG in mV", row=1, col=1)
+fig.update_yaxes(title_text="Heart Rate", row=2, col=1)
+
 st.plotly_chart(fig, use_container_width=True)
 
 st.write("## Parameter")
-st.write("Max Heartrate", ekg.max_heart_rate(Person.calc_age(current_person_dict["date_of_birth"]), "male"))
 st.write("Durchschnittswert in mV", ekg.ergebnis["Amplitude"].mean())
 
-# Main execution
-if __name__ == "__main__":
-    print("EKG Analyse")
-    
-    # Load the person data from JSON file
-    with open("data/person_db.json", "r") as file:
-        person_data = json.load(file)
-    
-    # Access the first EKG test data for the first person in the JSON
-    ekg_dict = person_data[0]["ekg_tests"][0]
-    print(ekg_dict)
-    
-    # Create an instance of EKGTest
-    ekg = EKGTest(ekg_dict["id"], ekg_dict["datum"], ekg_dict["ergebnis_pfad"])
-    
-    # Print the first few rows of the EKG data
-    print(ekg.ergebnis.head())
     
 st.markdown(
     """
